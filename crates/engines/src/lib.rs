@@ -75,13 +75,11 @@ pub fn locate(id: &str, overrides: &dyn ToolPathLookup, store: &Path) -> Option<
     })
 }
 
-/// Find an engine where the settings or the managed store say only: the environment override
-/// (`KUNA_COMMAND`), then what [`locate`] finds before it looks around the computer (PATH and
-/// standard install folders).
+/// Find an engine where the settings or the managed store say only: what [`locate`] finds
+/// before it looks around the computer (PATH and standard install folders). The environment
+/// override is a [`locate`] tier only: `only_configured` means settings and the store, not the
+/// environment.
 pub fn locate_configured(id: &str, overrides: &dyn ToolPathLookup, store: &Path) -> Option<PathBuf> {
-    if let Some(p) = exe_env_override(id) {
-        return Some(p);
-    }
     if let Some(p) = overrides.override_for(id)
         && p.exists()
     {

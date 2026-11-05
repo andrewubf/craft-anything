@@ -23,9 +23,10 @@ const LIST_SECS: u64 = 60;
 const DECOMPILE_SECS: u64 = 120;
 const EXPORT_SECS: u64 = 300;
 /// `max_functions` bound for an export: the selection travels as repeated `--addr 0xVMA`
-/// arguments, so a name containing a comma cannot corrupt it and no single argument grows
-/// with the function count.
-const MAX_EXPORT_FUNCTIONS: usize = 2000;
+/// arguments, so a name containing a comma cannot corrupt it. Each address adds about 16–20
+/// characters, so 1000 keeps the whole command line comfortably small; larger exports run
+/// unbounded instead, through kuna's own limits.
+const MAX_EXPORT_FUNCTIONS: usize = 1000;
 /// How many written files an export lists; more are counted, not named.
 const MAX_LISTED_FILES: usize = 500;
 
@@ -134,7 +135,7 @@ pub struct ProjectExportParams {
     pub path: Option<String>,
     /// Absolute path of the folder to write the project into; it must not exist yet (Kuna creates it).
     pub output_dir: String,
-    /// Export at most this many functions (1–2000), the first by address; all when omitted.
+    /// Export at most this many functions (1–1000), the first by address; all when omitted.
     /// Bounded through Kuna's own inventory (`--sort addr --limit`) and `--functions` selection,
     /// and held to the bound even if the inventory answers more than was asked for.
     #[serde(default)]
@@ -675,7 +676,7 @@ fn kuna_project_export(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, T
     if let Some((n, total)) = bounded {
         lims.push(Limitation::new(
             "functions_bounded",
-            format!("The export was cut short: the first {n} of {total} functions by address; raise max_functions (at most {MAX_EXPORT_FUNCTIONS}) for more."),
+            format!("The export was cut short: the first {n} of {total} functions by address; raise max_functions (at most {MAX_EXPORT_FUNCTIONS}) or leave it out to export all functions."),
         ));
     }
     if total > files.len() {
