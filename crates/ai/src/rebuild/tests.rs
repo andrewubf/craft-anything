@@ -311,6 +311,7 @@ fn notes_added_while_it_works_reach_the_agent_at_its_next_step() {
         usage: None,
         self_check: None,
         reset_progress_after_notes: false,
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
     };
     assert!(w.added(&mut ws).is_none(), "nothing added, nothing to say");
     let note = |id, text: &str| Note { id, text: format!("{text} (pictures: a.png)"), shown: text.into(), pictures: Vec::new() };
@@ -1039,6 +1040,7 @@ fn an_api_backend_builds_with_the_build_tools() {
         usage: None,
         self_check: None,
         reset_progress_after_notes: false,
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
     };
     w.attach(&ws).unwrap();
     // The model writes a file with the Build tools, then answers.
@@ -1156,6 +1158,7 @@ fn the_mechanics_sheet_is_required_and_held_against_the_code() {
         usage: None,
         self_check: None,
         reset_progress_after_notes: false,
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
     };
     let check = |round| w.run_checks(&ws, &SheetKind, round).unwrap().remove(0);
 
@@ -1926,6 +1929,7 @@ fn check_worker(ws: &Workspace, deep: bool) -> Worker {
         usage: None,
         self_check: None,
         reset_progress_after_notes: false,
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
     }
 }
 
@@ -2313,6 +2317,7 @@ fn preparing_the_builders_agent_does_not_lock_up() {
         usage: None,
         self_check: None,
         reset_progress_after_notes: false,
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
     };
     let entry = crate::BackendEntry {
         config: crate::BackendConfig {
@@ -2355,6 +2360,7 @@ fn the_run_answers_the_builders_own_check_during_its_turn() {
         usage: None,
         self_check: Some((Arc::new(SheetKind), 90.0)),
         reset_progress_after_notes: false,
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
     };
     let mut builder = ChecksItsWork { root: ws.root.clone(), asked: None, reply: None };
     let reply = w.turn(&mut ws, &mut builder, "Build it.", None).unwrap();
@@ -2549,6 +2555,7 @@ fn a_note_the_builder_took_at_a_step_joins_the_feed_and_isnt_sent_again() {
         usage: None,
         self_check: None,
         reset_progress_after_notes: false,
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
     };
     let dir = notes::notes_dir(&ws.inbox_dir());
     notes::hand_over(&dir, 1, "make the header blue").unwrap();
@@ -2762,6 +2769,7 @@ fn a_session_left_on_another_computer_starts_a_new_one_from_the_project() {
         usage: None,
         self_check: None,
         reset_progress_after_notes: false,
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
     };
     let first = resumed_elsewhere("THE BRIEF", &ws.manifest.last_reply, None);
     let reply = w.turn(&mut ws, &mut agent, "The person asks: make it blue", Some(first)).unwrap();
@@ -2817,6 +2825,7 @@ fn a_missing_session_with_nothing_to_start_from_is_said_plainly() {
         usage: None,
         self_check: None,
         reset_progress_after_notes: false,
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
     };
     let e = w.turn_with_wait(&mut ws, &mut agent, "Carry on.", None, |_, _| panic!("a missing session without a fresh start must not be retried")).unwrap_err();
     assert!(e.message.contains("isn't on this computer"), "{e:?}");
@@ -2881,6 +2890,7 @@ fn the_builders_conversation_travels_with_the_project() {
         usage: None,
         self_check: None,
         reset_progress_after_notes: false,
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
     };
     let adapter = KeepsSessions(store.path().to_path_buf());
     // No session yet, or one this computer doesn't have: nothing to keep, nothing said.

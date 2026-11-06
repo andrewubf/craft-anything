@@ -79,6 +79,7 @@ pub fn ask(
             deep,
             logs: logs.clone(),
             resume,
+            key: hub.keys.resolve(&entry.config.name, entry.config.kind),
             preamble: Some(PREAMBLE.into()),
             ..CliSpec::new(entry.config.clone(), entry.options.clone(), false, Some(ws.root.clone()))
         };

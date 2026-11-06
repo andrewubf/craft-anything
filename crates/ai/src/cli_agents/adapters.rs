@@ -7,11 +7,13 @@ use super::*;
 
 mod antigravity;
 mod copilot;
+mod devin;
 mod hermes;
 mod maki;
 mod opencode;
 pub use antigravity::Antigravity;
 pub use copilot::Copilot;
+pub use devin::Devin;
 pub use hermes::Hermes;
 pub use maki::Maki;
 pub use opencode::OpenCode;
@@ -214,7 +216,7 @@ impl Default for AgentAdapters {
 }
 
 impl AgentAdapters {
-    /// The built-in coding agents, including Copilot's ACP-only adapter.
+    /// The built-in coding agents, including Copilot's ACP-only adapter and Devin's.
     pub fn built_in() -> AgentAdapters {
         AgentAdapters {
             adapters: vec![
@@ -226,6 +228,7 @@ impl AgentAdapters {
                 Arc::new(Hermes),
                 Arc::new(Maki),
                 Arc::new(Copilot),
+                Arc::new(Devin),
             ],
         }
     }

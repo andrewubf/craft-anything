@@ -135,6 +135,7 @@ fn prepare(engine: &Engine, entry: &BackendEntry, beginner: bool) -> Result<CliS
     spec.targets = targets;
     spec.deep = !session.clean_room();
     spec.logs = Some(crate::failure_log::dir_in(&session.config_dir()));
+    spec.key = crate::KeyStore::system().resolve(&spec.config.name, spec.config.kind);
     Ok(spec)
 }
 

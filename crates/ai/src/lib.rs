@@ -77,15 +77,7 @@ impl BackendKind {
             BackendKind::Openrouter => openai::OPENROUTER_MODELS,
             BackendKind::Gemini => openai::GEMINI_MODELS,
             BackendKind::OpenaiCompatible => &[],
-            BackendKind::AgentCli => &["claude-code", "codex", "copilot", "gemini-cli", "opencode", "antigravity", "hermes", "maki"],
-        }
-    }
-
-    /// A coding agent run as a program, rather than an HTTP API.
-    pub fn is_harness(self) -> bool {
-        match self {
-            BackendKind::AgentCli => true,
-            BackendKind::Anthropic | BackendKind::Openai | BackendKind::Openrouter | BackendKind::Gemini | BackendKind::OpenaiCompatible => false,
+            BackendKind::AgentCli => &["claude-code", "codex", "copilot", "gemini-cli", "opencode", "antigravity", "hermes", "maki", "devin"],
         }
     }
 

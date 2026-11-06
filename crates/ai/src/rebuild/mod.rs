@@ -251,6 +251,7 @@ impl RebuildRun {
             usage: Some(UsageClock { root: root.clone(), since: Instant::now() }),
             self_check: None,
             reset_progress_after_notes: false,
+            keys: hub.keys.clone(),
         };
         let r2 = running.clone();
         std::thread::Builder::new()
@@ -433,6 +434,8 @@ struct Worker {
     self_check: Option<(Arc<dyn kinds::TargetKind>, f64)>,
     /// A hook consumed a new request; persist its reset only after the builder finishes.
     reset_progress_after_notes: bool,
+    /// The backends' stored keys, for an agent CLI that asks the host to authenticate (Devin).
+    keys: crate::keys::KeyStore,
 }
 
 /// The project a run records its usage in, and when it last did.
@@ -574,6 +577,7 @@ impl Worker {
             deep,
             targets,
             logs: Some(crate::failure_log::dir_in(&config_dir)),
+            key: self.keys.resolve(&entry.config.name, entry.config.kind),
             resume: ws.manifest.agent_session.clone(),
             preamble: Some(
                 "You work inside Craft Anything for a person who doesn't code. The message below is your task.
