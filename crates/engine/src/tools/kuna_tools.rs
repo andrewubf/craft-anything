@@ -9,7 +9,7 @@
 use super::native_common::{page, params_json, spec};
 use super::static_input::{self, builder};
 use crate::tool::{Ctx, Effects, Requires, ToolOutput, ToolSpec, Toolset, parse_params, schema_of};
-use craft_anything_evidence::{Authority, Confidence, Coverage, ErrorCode, Limitation, Subject, ToolError};
+use craft_anything_evidence::{Authority, Confidence, Coverage, CoverageStatus, ErrorCode, Limitation, Subject, ToolError};
 use craft_anything_platform::process::nonzero_error;
 use craft_anything_platform::{Output, Process};
 use schemars::JsonSchema;
@@ -226,7 +226,7 @@ fn run(ctx: &Ctx<'_>, exe: &Path, args: &[String], secs: u64) -> Result<Output, 
     Process::new(exe)
         .args(args)
         .timeout(Duration::from_secs(secs))
-        .idle_timeout(Duration::from_secs(secs.min(120)))
+        .idle_timeout(Duration::from_secs(secs))
         .stdout_cap(16 << 20)
         .stderr_cap(1 << 20)
         .cancel_when(move || cancel.is_cancelled())
@@ -236,6 +236,10 @@ fn run(ctx: &Ctx<'_>, exe: &Path, args: &[String], secs: u64) -> Result<Output, 
 
 /// Kuna's `--json` output, or a clear error when it isn't JSON this build can read.
 fn json_output(out: &Output, what: &str) -> Result<Value, ToolError> {
+    if out.stdout_truncated {
+        return Err(ToolError::new(ErrorCode::OverLimit, format!("kuna's {what} output exceeded 16 MiB."))
+            .with_remediation("Narrow the request where possible, or use text output for decompilation."));
+    }
     serde_json::from_slice(&out.stdout).map_err(|_| garbled(what))
 }
 
@@ -548,13 +552,24 @@ fn kuna_decompile(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolEr
             m.insert("functions".to_string(), Value::Array(fns));
             m.insert("count".to_string(), json!(n));
         }
+        let mut lims = base_lims();
+        if !out.success {
+            lims.push(Limitation::new(
+                "nonzero_exit",
+                format!("The tool exited with {:?}; see stderr. The functions above are what it decompiled before that.", out.code),
+            ));
+        }
         let b = builder(ctx, "kuna_decompile", input.subject, params_json(&p))
             .result(result)
             .summary(format!("kuna decompile of {target}: {n} function{}.", if n == 1 { "" } else { "s" }))
             .confidence(Confidence::Observed)
             .authority(Authority::OutsideService)
-            .limitations(base_lims())
-            .coverage(Coverage::complete(n as u64));
+            .limitations(lims)
+            .coverage(if out.success {
+                Coverage::complete(n as u64)
+            } else {
+                Coverage { status: CoverageStatus::Partial, examined: Some(n as u64), total: None, next_offset: None }
+            });
         return Ok(ToolOutput::evidence(b.build()?));
     }
     text_evidence(ctx, "kuna_decompile", input.subject, params_json(&p), &exe, &args, &out, p.offset, p.limit, format!("kuna decompile of {target}"))
@@ -683,19 +698,25 @@ fn kuna_project_export(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, T
         lims.push(Limitation::new("files_list_truncated", format!("{total} files were written; the first {} are listed.", files.len())));
     }
     let mut result = meta(&exe, &args, &out);
+    let listed = files.len();
     if let Value::Object(m) = &mut result {
         m.insert("output_dir".to_string(), json!(dir.display().to_string()));
         m.insert("files".to_string(), Value::Array(files));
         m.insert("total_files".to_string(), json!(total));
         m.insert("stdout".to_string(), json!(out.stdout_text().chars().take(4096).collect::<String>()));
     }
+    let coverage = match bounded {
+        Some((n, t)) => Coverage { status: CoverageStatus::Partial, examined: Some(n as u64), total: Some(t), next_offset: None },
+        None if total > listed => Coverage { status: CoverageStatus::Partial, examined: Some(listed as u64), total: Some(total as u64), next_offset: None },
+        None => Coverage::complete(total as u64),
+    };
     let b = builder(ctx, "kuna_project_export", input.subject, params_json(&p))
         .result(result)
         .summary(format!("kuna exported {total} files to {}.", dir.display()))
         .confidence(Confidence::Observed)
         .authority(Authority::OutsideService)
         .limitations(lims)
-        .coverage(Coverage::complete(total as u64));
+        .coverage(coverage);
     Ok(ToolOutput::evidence(b.build()?))
 }
 
