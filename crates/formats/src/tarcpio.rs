@@ -64,18 +64,20 @@ fn octal(f: &[u8]) -> Option<u64> {
     if let Some((&first, rest)) = f.split_first()
         && first & 0x80 != 0
     {
+        if first & 0x40 != 0 {
+            return None; // Negative base-256 values cannot represent a member size or mode.
+        }
         let mut v = u64::from(first & 0x7f);
         for &b in rest {
             v = v.checked_mul(256)?.checked_add(u64::from(b))?;
         }
         return Some(v);
     }
-    let s: Vec<u8> = f.iter().copied().filter(|&b| b != 0 && b != b' ').collect();
-    if s.is_empty() {
-        return Some(0);
-    }
+    let is_padding = |b: &u8| *b == 0 || *b == b' ';
+    let Some(start) = f.iter().position(|b| !is_padding(b)) else { return Some(0) };
+    let end = f.iter().rposition(|b| !is_padding(b))?;
     let mut v = 0u64;
-    for b in s {
+    for &b in f.get(start..=end)? {
         if !(b'0'..=b'7').contains(&b) {
             return None;
         }
@@ -425,6 +427,10 @@ mod tests {
         assert_eq!(octal(b"0000644 \0"), Some(0o644));
         assert_eq!(octal(b"  \0"), Some(0));
         assert_eq!(octal(b"9"), None);
+        assert_eq!(octal(b"0 10"), None);
+        assert_eq!(octal(b"1\x002"), None);
+        assert_eq!(octal(b" 0010\0 "), Some(8));
+        assert_eq!(octal(&[0xff; 8]), None);
         assert_eq!(octal(&[0x80, 0, 0, 1, 0]), Some(256));
         assert_eq!(octal(&[0xff; 12]), None);
     }

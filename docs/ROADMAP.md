@@ -1156,6 +1156,8 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch bugfix/r3.12-ipv6-version-20261105
 - [x] Stop decoding extension headers inside noninitial IPv6 fragments.
       — claimed: Afloat16, branch bugfix/r3.12-ipv6-fragment-payload-20261105
+- [x] Keep tar octal digits contiguous and reject negative GNU binary sizes instead of reading them as positive values.
+      — claimed: Afloat16, branch bugfix/r3.12-tar-octal-fields
 - [x] Enforce the expanded DNS name wire-length limit.
       — claimed: Afloat16, branch bugfix/r3.12-dns-name-wire-length-20261105
 - [x] Report truncated DNS TXT strings as incomplete.
