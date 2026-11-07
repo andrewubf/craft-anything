@@ -392,10 +392,9 @@ pub fn inspect(data: &[u8]) -> Result<SolanaProgram, FormatError> {
         if !is_rela && !is_rel {
             continue;
         }
-        let symtab = raw_sections.get(s.sh_link as usize);
-        let strtab = symtab.and_then(|st| raw_sections.get(st.sh_link as usize)).and_then(|st| str_table(data, st.sh_offset, st.sh_size));
-        let symtab_off = symtab.map(|st| st.sh_offset).unwrap_or(0);
-        let symtab_ent = symtab.map(|st| if st.sh_entsize >= 24 { st.sh_entsize as usize } else { 24 }).unwrap_or(24);
+        let symtab = raw_sections.get(s.sh_link as usize).filter(|st| matches!(st.sh_type, 2 | 11));
+        let strtab =
+            symtab.and_then(|st| raw_sections.get(st.sh_link as usize)).filter(|st| st.sh_type == 3).and_then(|st| str_table(data, st.sh_offset, st.sh_size));
         let entsize = if is_rela { 24usize } else { 16 };
         let count = (s.sh_size as usize) / entsize;
         let base = usize::try_from(s.sh_offset).unwrap_or(usize::MAX);
@@ -403,11 +402,19 @@ pub fn inspect(data: &[u8]) -> Result<SolanaProgram, FormatError> {
             let Some(o) = i.checked_mul(entsize).and_then(|x| x.checked_add(base)) else { break };
             let (Some(r_offset), Some(r_info)) = (r.u64_le(o), r.u64_le(o + 8)) else { break };
             let addend = if is_rela { r.u64_le(o + 16).map(|v| v as i64).unwrap_or(0) } else { 0 };
-            let sym_idx = (r_info >> 32) as usize;
+            let sym_idx = r_info >> 32;
             let type_id = (r_info & 0xffff_ffff) as u32;
             // Resolve the referenced symbol name from the relocation's symbol table.
             let sym_name = {
-                let so = usize::try_from(symtab_off).ok().and_then(|b| sym_idx.checked_mul(symtab_ent).and_then(|x| x.checked_add(b)));
+                let so = symtab.and_then(|st| {
+                    if st.sh_entsize < 24 || sym_idx >= st.sh_size / st.sh_entsize {
+                        return None;
+                    }
+                    let offset = st.sh_offset.checked_add(sym_idx.checked_mul(st.sh_entsize)?)?;
+                    let offset = usize::try_from(offset).ok()?;
+                    r.slice(offset, 24)?;
+                    Some(offset)
+                });
                 so.and_then(|so| r.u32_le(so)).and_then(|n| strtab.as_ref().and_then(|t| read_str(t, n))).unwrap_or_default()
             };
             let symbol_hash = (!sym_name.is_empty()).then(|| murmur3_32(sym_name.as_bytes(), 0));
@@ -533,6 +540,29 @@ fn read_str(table: &[u8], idx: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Preserve the relocation itself when either its symbol extent or its linked string table is invalid.
+    #[test]
+    fn relocations_do_not_borrow_symbol_names() {
+        let original = craft_anything_testkit::sbpf::program();
+        let table = u64::from_le_bytes(original[40..48].try_into().unwrap()) as usize;
+        let dynsym = table + 3 * 64;
+        let dynstr = table + 2 * 64;
+        for bad_link in [false, true] {
+            let mut elf = original.clone();
+            if bad_link {
+                elf[dynstr + 4..dynstr + 8].copy_from_slice(&1u32.to_le_bytes());
+            } else {
+                // Only the null symbol belongs to this table. Physical bytes for the
+                // next symbol are still present, as in an adjacent ELF section.
+                elf[dynsym + 32..dynsym + 40].copy_from_slice(&24u64.to_le_bytes());
+            }
+            let report = inspect(&elf).unwrap();
+            assert_eq!(report.relocations.len(), 1);
+            assert!(report.relocations[0].symbol.is_empty());
+            assert!(report.relocations[0].symbol_hash.is_none());
+        }
+    }
 
     #[test]
     fn murmur_matches_known_vectors() {
