@@ -352,12 +352,15 @@ impl Binary {
         for s in self.sections.iter().filter(|s| s.alloc) {
             if let Some(fo) = s.file_offset
                 && off >= fo
-                && off - fo < s.file_size
+                && off - fo < s.file_size.min(s.size)
             {
                 return s.addr.checked_add(off - fo);
             }
         }
-        self.segments.iter().find(|s| off >= s.file_offset && off - s.file_offset < s.file_size).and_then(|s| s.addr.checked_add(off - s.file_offset))
+        self.segments
+            .iter()
+            .find(|s| off >= s.file_offset && off - s.file_offset < s.file_size.min(s.size))
+            .and_then(|s| s.addr.checked_add(off - s.file_offset))
     }
 
     /// Up to `len` file-backed bytes at `va`, never crossing the end of its section or segment.
@@ -376,12 +379,12 @@ impl Binary {
         {
             let delta = va - s.addr;
             if delta < s.file_size {
-                return Some(s.file_size - delta);
+                return Some(s.file_size.min(s.size) - delta);
             }
         }
         let seg = self.segment_at(va)?;
         let delta = va - seg.addr;
-        if delta < seg.file_size { Some(seg.file_size - delta) } else { None }
+        if delta < seg.file_size { Some(seg.file_size.min(seg.size) - delta) } else { None }
     }
 
     /// Read a pointer-sized little/big-endian value at `va`.
@@ -771,6 +774,23 @@ fn collect_symbols(file: &object::File<'_>, b: &mut Binary) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A section and a fallback segment both map two bytes of a four-byte file extent.
+    #[test]
+    fn file_padding_is_not_a_virtual_address() {
+        let mut bin = Binary::raw(Arch::X86, 0x1000, 2, 4);
+        bin.sections[0].file_size = 4;
+        let data = [0, 0, 0, 0, 1, 2, 3, 4];
+        for section in [true, false] {
+            if !section {
+                bin.sections.clear();
+                bin.segments.push(Segment { name: "load".into(), addr: 0x1000, size: 2, file_offset: 4, file_size: 4, read: true, write: false, exec: true });
+            }
+            assert_eq!(bin.offset_to_va(5), Some(0x1001));
+            assert_eq!(bin.offset_to_va(6), None);
+            assert_eq!(bin.read(&data, 0x1000, 4), Some(&data[4..6]));
+        }
+    }
 
     #[test]
     fn demangles_rust_names() {
