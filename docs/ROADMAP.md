@@ -1152,6 +1152,8 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch bugfix/r3.12-dns-question-class-review-20261104
 - [x] Reject impossible IPv4 header and total lengths.
       — claimed: Afloat16, branch bugfix/r3.12-ipv4-header-lengths-20261105
+- [x] Validate index source map section offsets and stop an unresolved section from borrowing mappings from the preceding section.
+      — claimed: Afloat16, branch bugfix/r3.12-index-map-boundaries
 - [x] Validate the version in IPv6 frames.
       — claimed: Afloat16, branch bugfix/r3.12-ipv6-version-20261105
 - [x] Stop decoding extension headers inside noninitial IPv6 fragments.
