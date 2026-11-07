@@ -693,6 +693,9 @@ Owner: open · Status: in progress
       kept somewhere we don't look (#1060)
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
       and complete a live generation with the selected model and variant (local catalogue verified).
+- [ ] Stop with a plain error when the `opencode` found is 1.x (its `run --help` has no
+      `--standalone`), instead of running it anyway and showing its usage (#1111)
+      — claimed: Agapenordev, branch bugfix/r2.2-opencode-v1-refusal
 
 "Found on this computer" has to mean "can do the job". Today only Claude Code gets everything.
 **Every builder gets the same tools:**
