@@ -218,9 +218,18 @@ pub fn unescape(s: &str) -> String {
                 } else {
                     it.by_ref().take(4).collect()
                 };
-                if let Some(ch) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
-                    out.push(ch);
+                let Ok(mut code) = u32::from_str_radix(&hex, 16) else { continue };
+                if (0xD800..0xDC00).contains(&code) {
+                    let mut ahead = it.clone();
+                    if ahead.next() == Some('\\') && ahead.next() == Some('u') {
+                        let lo: String = ahead.by_ref().take(4).collect();
+                        if let Some(lo) = u32::from_str_radix(&lo, 16).ok().filter(|l| lo.len() == 4 && (0xDC00..0xE000).contains(l)) {
+                            code = 0x10000 + ((code - 0xD800) << 10) + (lo - 0xDC00);
+                            it = ahead;
+                        }
+                    }
                 }
+                out.push(char::from_u32(code).unwrap_or('\u{FFFD}'));
             }
             Some('\n') => {}
             Some(other) => out.push(other),
@@ -310,6 +319,14 @@ mod tests {
 
     fn kinds(s: &str) -> Vec<(TokKind, String)> {
         tokenize(s, 1000).0.into_iter().map(|t| (t.kind, t.text.to_string())).collect()
+    }
+
+    #[test]
+    fn unescape_combines_surrogate_pairs() {
+        assert_eq!(unescape("\\uD83D\\uDE00"), "😀");
+        assert_eq!(unescape("a\\uD83D\\u0041"), "a\u{FFFD}A");
+        assert_eq!(unescape("\\uDE00x"), "\u{FFFD}x");
+        assert_eq!(unescape("\\u{1F600}"), "😀");
     }
 
     #[test]
