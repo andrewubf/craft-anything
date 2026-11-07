@@ -332,6 +332,17 @@ pub(crate) fn cpio_with_checksum(data: &[u8], max_members: usize, checksum: &mut
             out.length = data.len() as u64;
             break;
         };
+        // newc permits extra trailing NULs in namesize for alignment.
+        let Some(end) = name_bytes.iter().position(|&b| b == 0) else {
+            out.warnings.push(format!("unterminated member name at {pos:#x}"));
+            out.length = pos as u64;
+            break;
+        };
+        if end == 0 || name_bytes.get(end..).is_some_and(|pad| pad.iter().any(|&b| b != 0)) {
+            out.warnings.push(format!("invalid member name at {pos:#x}"));
+            out.length = pos as u64;
+            break;
+        }
         let name = text(name_bytes);
         let Some(data_off) = (pos + hdr_len).checked_add(namesize).and_then(align) else { break };
         let size = usize::try_from(filesize).unwrap_or(usize::MAX);
@@ -342,7 +353,11 @@ pub(crate) fn cpio_with_checksum(data: &[u8], max_members: usize, checksum: &mut
         };
         if name == "TRAILER!!!" {
             out.length = next.min(data.len()) as u64;
-            out.complete = true;
+            if size == 0 && next <= data.len() {
+                out.complete = true;
+            } else {
+                out.warnings.push(format!("invalid or truncated trailer at {pos:#x}"));
+            }
             break;
         }
         let mode = u32::try_from(mode).unwrap_or(0);
@@ -406,6 +421,26 @@ mod tests {
         let l2 = tar(&t, 1).unwrap();
         assert!(l2.truncated);
         assert_eq!(l2.members.len(), 1);
+    }
+
+    #[test]
+    fn cpio_names_and_trailers_must_be_complete() {
+        let bytes = fx::cpio_newc(&[("abc", b"x", 0o100644)]);
+        let trailer = bytes.windows(6).rposition(|b| b == b"070701").unwrap();
+        for (offset, byte) in [(113, b'x'), (111, 0)] {
+            let mut damaged = bytes.clone();
+            damaged[offset] = byte;
+            let listed = cpio(&damaged, 10).unwrap();
+            assert!(!listed.complete);
+            assert!(listed.members.is_empty());
+        }
+        let mut padded_name = bytes.clone();
+        padded_name[112] = 0;
+        assert_eq!(cpio(&padded_name, 10).unwrap().members[0].name, "ab");
+        let mut with_payload = bytes.clone();
+        with_payload[trailer + 61] = b'1';
+        assert!(!cpio(&with_payload, 10).unwrap().complete);
+        assert!(!cpio(&bytes[..bytes.len() - 1], 10).unwrap().complete);
     }
 
     #[test]
