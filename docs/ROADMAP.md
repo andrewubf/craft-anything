@@ -1200,6 +1200,8 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch bugfix/r3.12-tensor-zero-dimension-product-20261105
 - [x] Find APK signatures through valid ZIP comments and framed central directories.
       — claimed: Afloat16, branch bugfix/r3.12-apk-sign-eocd-comment-boundary-20261105
+- [x] Validate DER algorithm identifiers, signature and key bit strings, and name fields before using them as certificate verification inputs.
+      — claimed: Afloat16, branch bugfix/r3.12-der-verification-fields
 - [x] Keep Mach-O load-command facts within their command.
       — claimed: Afloat16, branch bugfix/r3.12-macho-load-command-framing-20261105
 - [x] Keep Mach-O function starts within their declared payload.
