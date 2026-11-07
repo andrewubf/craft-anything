@@ -235,13 +235,14 @@ fn pax_records(b: &[u8]) -> Vec<(String, String)> {
     while i < b.len() && out.len() < 256 {
         let rest = b.get(i..).unwrap_or(&[]);
         let Some(sp) = rest.iter().position(|&c| c == b' ') else { break };
-        let Some(len) = std::str::from_utf8(rest.get(..sp).unwrap_or(&[])).ok().and_then(|s| s.parse::<usize>().ok()) else { break };
+        let Some(digits) = rest.get(..sp).filter(|v| !v.is_empty() && v.iter().all(u8::is_ascii_digit)) else { break };
+        let Some(len) = std::str::from_utf8(digits).ok().and_then(|s| s.parse::<usize>().ok()) else { break };
         if len <= sp + 1 {
             break;
         }
         let Some(rec) = rest.get(sp + 1..len) else { break };
-        let rec = rec.strip_suffix(b"\n").unwrap_or(rec);
-        if let Some(eq) = rec.iter().position(|&c| c == b'=') {
+        let Some(rec) = rec.strip_suffix(b"\n") else { break };
+        if let Some(eq) = rec.iter().position(|&c| c == b'=').filter(|&eq| eq > 0) {
             let k = String::from_utf8_lossy(rec.get(..eq).unwrap_or(&[])).into_owned();
             let v = String::from_utf8_lossy(rec.get(eq + 1..).unwrap_or(&[])).into_owned();
             out.push((k, v));
@@ -427,6 +428,14 @@ mod tests {
         assert_eq!(octal(b"9"), None);
         assert_eq!(octal(&[0x80, 0, 0, 1, 0]), Some(256));
         assert_eq!(octal(&[0xff; 12]), None);
+    }
+
+    #[test]
+    fn pax_overrides_need_a_decimal_length_a_key_and_a_newline() {
+        assert!(pax_records(b"11 path=bad").is_empty());
+        assert!(pax_records(b"+12 path=no\n").is_empty());
+        assert!(pax_records(b"5 =x\n").is_empty());
+        assert_eq!(pax_records(b"12 path=a=b\n11 path=bad"), [("path".to_owned(), "a=b".to_owned())]);
     }
 
     #[test]
