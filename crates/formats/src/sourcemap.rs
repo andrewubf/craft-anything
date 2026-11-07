@@ -94,8 +94,8 @@ impl SourceMap {
     pub fn original_positions(&self, line: u32, column: u32) -> Vec<OriginalPosition> {
         if !self.sections.is_empty() {
             // Last section that starts at or before the position.
-            let found = self.sections.iter().rev().find(|(l, c, _)| (*l, *c) <= (line, column));
-            let Some((l, c, map)) = found else { return Vec::new() };
+            let end = self.sections.partition_point(|(l, c, _)| (*l, *c) <= (line, column));
+            let Some((l, c, map)) = end.checked_sub(1).and_then(|i| self.sections.get(i)) else { return Vec::new() };
             let rel_line = line.saturating_sub(*l);
             let rel_col = if rel_line == 0 { column.saturating_sub(*c) } else { column };
             return map
@@ -114,8 +114,10 @@ impl SourceMap {
         let idx = segs.partition_point(|s| s.generated_column <= column);
         let Some(best) = idx.checked_sub(1).and_then(|i| segs.get(i)) else { return Vec::new() };
         let col = best.generated_column;
-        segs.iter()
-            .filter(|s| s.generated_column == col)
+        let first = segs.partition_point(|s| s.generated_column < col);
+        segs.get(first..idx)
+            .unwrap_or_default()
+            .iter()
             .filter_map(|s| {
                 let (src, l, c, n) = s.original?;
                 Some(OriginalPosition {
@@ -324,6 +326,15 @@ pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lookup_keeps_coincident_mappings_and_stops_at_an_unmapped_segment() {
+        let map = parse(br#"{"version":3,"sources":["a","b"],"mappings":"EAAA,ACAA,E"}"#, Limits::default()).unwrap();
+        assert!(map.original_positions(0, 1).is_empty());
+        let matches = map.original_positions(0, 3);
+        assert_eq!(matches.iter().map(|p| p.source_index).collect::<Vec<_>>(), [0, 1]);
+        assert!(map.original_positions(0, 4).is_empty());
+    }
 
     #[test]
     fn decodes_and_looks_up() {

@@ -1208,6 +1208,8 @@ Owner: open · Status: in progress
       — claimed: Afloat16, branch bugfix/r3.12-codesign-superblob-length-boundary-20261105
 - [x] Keep PE optional-header reads within the declared header.
       — claimed: Afloat16, branch bugfix/r3.12-pe-optional-header-framing-20261105
+- [x] Use the sorted section and segment boundaries during source-map position lookups so repeated symbolication visits only matching positions.
+      — claimed: Afloat16, branch bugfix/r3.12-source-map-lookup-work
 - [x] Keep PE resource metadata within the resource directory.
       — claimed: Afloat16, branch bugfix/r3.12-pe-resource-directory-boundary-20261105
 - [x] Keep Go function tables and names within their section.
