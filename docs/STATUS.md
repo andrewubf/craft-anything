@@ -8,6 +8,7 @@ workspace clippy, layers, fmt and the secret scan of all history were clean. Chi
 
 | Area | State | Verified by |
 |---|---|---|
+| ASAR listings | Rejected unsafe names count toward the listing limit alongside retained entries. | Synthetic regression `invalid_names_consume_the_listing_budget` in the formats crate. |
 | Watched descendant regression | A guarded Rust parent starts the heartbeat child in its inherited process group/job. No shell quoting is involved. The watched launch is stopped before missing startup markers can fail an assertion | macOS regressions pass for descendant shutdown, startup-timeout cleanup and direct ignored-fixture runs without guards. Windows execution of this replacement remains pending; the prior shell fixture failed there. The platform suite still has the separately tracked preview-connection fixture failure |
 | Disabled chat backends | Naming a backend that is off refuses chat and either side of compare with a settings error and guidance, before API or coding-agent setup | Isolated hub regressions for disabled API and agent backends, both compare positions, and enabled/automatic controls. Invalid tunnel settings detect API setup before the guard. No live provider or agent was used |
 | Request-based project kinds | Low-level tools and media players keep the app target when “level” or “player” describes the tool. Explicit game requests and game engines still select the game target | Request-classification regression cases |
