@@ -386,16 +386,20 @@ impl Binary {
 
     /// Read a pointer-sized little/big-endian value at `va`.
     pub fn read_ptr(&self, data: &[u8], va: u64) -> Option<u64> {
-        let n = if self.bits == 64 { 8 } else { 4 };
+        let n = match self.bits {
+            16 => 2,
+            32 => 4,
+            64 => 8,
+            _ => return None,
+        };
         let b = self.read(data, va, n)?;
-        if b.len() != n {
-            return None;
-        }
         Some(match (n, self.little_endian) {
-            (8, true) => u64::from_le_bytes(b.try_into().ok()?),
-            (8, false) => u64::from_be_bytes(b.try_into().ok()?),
-            (_, true) => u64::from(u32::from_le_bytes(b.try_into().ok()?)),
-            (_, false) => u64::from(u32::from_be_bytes(b.try_into().ok()?)),
+            (2, true) => u64::from(u16::from_le_bytes(b.try_into().ok()?)),
+            (2, false) => u64::from(u16::from_be_bytes(b.try_into().ok()?)),
+            (4, true) => u64::from(u32::from_le_bytes(b.try_into().ok()?)),
+            (4, false) => u64::from(u32::from_be_bytes(b.try_into().ok()?)),
+            (_, true) => u64::from_le_bytes(b.try_into().ok()?),
+            (_, false) => u64::from_be_bytes(b.try_into().ok()?),
         })
     }
 
@@ -771,6 +775,17 @@ fn collect_symbols(file: &object::File<'_>, b: &mut Binary) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_pointer_follows_the_image_width() {
+        let mut bin = Binary::raw(Arch::X86_16, 0x100, 4, 0);
+        let data = [0x34, 0x12, 0xcd, 0xab];
+        assert_eq!(bin.read_ptr(&data, 0x100), Some(0x1234));
+        assert_eq!(bin.read_ptr(&data, 0x102), Some(0xabcd));
+        assert_eq!(bin.read_ptr(&data, 0x103), None);
+        bin.little_endian = false;
+        assert_eq!(bin.read_ptr(&data, 0x102), Some(0xcdab));
+    }
 
     #[test]
     fn demangles_rust_names() {
