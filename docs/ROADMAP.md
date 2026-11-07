@@ -889,6 +889,8 @@ Owner: open · Status: in progress
       use their toolchain commands
 - [ ] Audit relative project placements in build, option-run and Play paths too: runtime window
       capture now normalizes its request paths, but earlier runner paths can still be relative
+- [x] Resolve Godot's project argument and the local Electron binary and project argument before
+      starting either runner from a relative project folder — claimed: Afloat16, branch bugfix/r2.7-project-launch-paths
 - [x] "player" alone doesn't make a request a game: a video or music player is an app (#953)
       — claimed: justinjohn0306, branch bugfix/953-player-not-a-game
 - [x] System-tool and media-player phrases keep the app target: "a low level disk tool",
