@@ -1065,8 +1065,8 @@ Gaps found while using the app for real projects.
       default fonts: without craft-fonts they show as boxes, and with it each such letter comes from
       Noto Sans CJK while the rest of the word is DM Sans. Bundle a DM Sans build that has the
       Vietnamese set (with its OFL notice) so Tiếng Việt renders in one face
-- [ ] "Open in the workbench" on a project opens the project's own target (a local app or file) and
-      loads the workbench list; today it only switches screens, so the workbench shows nothing (#1107)
+- [x] "Open in the workbench" on a project opens the project's own target (a local app or file) and
+      loads the workbench list in Deep mode; it used to only switch screens, so the workbench showed nothing (#1107)
       — claimed: Agapenordev, branch bugfix/r2.9-workbench-opens-project-target
 
 ### R2.10 Pinned builds
