@@ -885,8 +885,9 @@ Owner: open · Status: in progress
       working directory, preserving virtualenv paths for relative project placements — PR #950
 - [x] Launch a Go project with one `cmd/<name>/main.go` as a package when the root has no
       `main.go` — claimed: Afloat16, branch feature/r2.7-go-command-layouts
-- [ ] Extend launch recipes to Python package scripts and Java build outputs; build checks already
-      use their toolchain commands
+- [x] Launch the single installed console script of a Python project from its virtual environment
+      — claimed: Afloat16, branch feature/r2.7-python-console-entrypoint
+- [ ] Extend launch recipes to Java build outputs; build checks already use their toolchain commands
 - [ ] Audit relative project placements in build, option-run and Play paths too: runtime window
       capture now normalizes its request paths, but earlier runner paths can still be relative
 - [x] "player" alone doesn't make a request a game: a video or music player is an app (#953)

@@ -35,6 +35,9 @@ pub struct Toolchain {
     /// Detect a script-only project from its launch entrypoint, after checking all manifest markers.
     #[serde(default)]
     pub standalone_entrypoints: bool,
+    /// Use a single installed PEP 621 console script after checking the fixed entrypoints.
+    #[serde(default)]
+    pub python_console_script: bool,
 }
 
 /// A declared entrypoint and argv template. A wildcard file must identify exactly one file.
@@ -134,8 +137,40 @@ impl Toolchain {
                 .collect();
             return self.command(app, &command);
         }
+        if self.python_console_script {
+            let (python, _) = self.command(app, &self.build)?;
+            let bin = python.parent().filter(|p| p.is_absolute())?;
+            return python_package_script(app, bin).map(|program| (program, Vec::new()));
+        }
         None
     }
+}
+
+/// Use the wrapper installed by the project's own Python, without guessing among entrypoints
+/// or searching PATH for a same-named program from a different package.
+fn python_package_script(app: &Path, bin: &Path) -> Option<PathBuf> {
+    let bytes = crate::tools::artifact_tools::read_capped(&app.join("pyproject.toml"), 1024 * 1024).ok()?;
+    let manifest: toml::Table = std::str::from_utf8(&bytes).ok()?.parse().ok()?;
+    let scripts = manifest.get("project")?.get("scripts")?.as_table()?;
+    let mut entries = scripts.iter();
+    let (name, entrypoint) = entries.next()?;
+    if entries.next().is_some() || entrypoint.as_str()?.trim().is_empty() {
+        return None;
+    }
+    // A script name is a filename on every OS, never an absolute path or traversal.
+    if !name.starts_with(|c: char| c.is_ascii_alphanumeric()) || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)) {
+        return None;
+    }
+    let file = bin.join(if cfg!(windows) { format!("{name}.exe") } else { name.clone() });
+    let metadata = file.metadata().ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return None;
+        }
+    }
+    metadata.is_file().then_some(file)
 }
 
 #[cfg(test)]
@@ -233,6 +268,32 @@ mod tests {
             assert_eq!(tool.command_for(dir.path(), &tool.build, windows).unwrap().0, path);
         }
         assert_eq!(tool.launch(dir.path()).unwrap().0, dir.path().join(if cfg!(windows) { ".venv/Scripts/python.exe" } else { ".venv/bin/python" }));
+    }
+
+    /// An installed package with no root script launches only its single local console wrapper.
+    #[test]
+    fn python_package_scripts_require_one_declared_and_installed_entrypoint() {
+        let project = tempfile::tempdir().unwrap();
+        let app = project.path();
+        let manifest = app.join("pyproject.toml");
+        let bin = app.join(if cfg!(windows) { ".venv/Scripts" } else { ".venv/bin" });
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join(if cfg!(windows) { "python.exe" } else { "python" }), "").unwrap();
+        let wrapper = bin.join(if cfg!(windows) { "sample-cli.exe" } else { "sample-cli" });
+        std::fs::write(&manifest, "[project.scripts]\nsample-cli = 'sample.cli:main'").unwrap();
+        assert_eq!(crate::outputs::launch(app, None), None);
+        std::fs::write(&wrapper, "").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(crate::outputs::launch(app, None), None);
+            std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert_eq!(crate::outputs::launch(app, None), Some((wrapper, vec![])));
+        for scripts in ["one = 'pkg:a'\ntwo = 'pkg:b'", "'../sample-cli' = 'pkg:a'", "sample-cli = 42"] {
+            std::fs::write(&manifest, format!("[project.scripts]\n{scripts}")).unwrap();
+            assert_eq!(crate::outputs::launch(app, None), None);
+        }
     }
 
     /// A local runner remains resolvable after the caller changes to a relative project folder.
