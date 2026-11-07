@@ -1147,6 +1147,8 @@ Owner: open · Status: in progress
 
 ### R3.12 Format parser correctness
 Owner: open · Status: in progress
+- [x] Keep relocation reads within their declared entry stride and never invent an addend for a truncated RELA.
+      — claimed: Afloat16, branch bugfix/r3.12-sbpf-rela
 - [x] Require a complete DNS question's type and class fields before retaining it, and keep
       truncated questions out of packet inventories while reporting the incomplete message
       — claimed: Afloat16, branch bugfix/r3.12-dns-question-class-review-20261104

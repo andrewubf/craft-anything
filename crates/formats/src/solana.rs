@@ -396,13 +396,23 @@ pub fn inspect(data: &[u8]) -> Result<SolanaProgram, FormatError> {
         let strtab = symtab.and_then(|st| raw_sections.get(st.sh_link as usize)).and_then(|st| str_table(data, st.sh_offset, st.sh_size));
         let symtab_off = symtab.map(|st| st.sh_offset).unwrap_or(0);
         let symtab_ent = symtab.map(|st| if st.sh_entsize >= 24 { st.sh_entsize as usize } else { 24 }).unwrap_or(24);
-        let entsize = if is_rela { 24usize } else { 16 };
-        let count = (s.sh_size as usize) / entsize;
+        let minimum = if is_rela { 24 } else { 16 };
+        let Ok(entsize) = usize::try_from(s.sh_entsize) else { continue };
+        if entsize < minimum {
+            warnings.push("an ELF relocation entry size is too short".into());
+            continue;
+        }
+        let count = usize::try_from(s.sh_size / s.sh_entsize).unwrap_or(usize::MAX);
         let base = usize::try_from(s.sh_offset).unwrap_or(usize::MAX);
         for i in 0..count.min(MAX_RELOCS) {
             let Some(o) = i.checked_mul(entsize).and_then(|x| x.checked_add(base)) else { break };
-            let (Some(r_offset), Some(r_info)) = (r.u64_le(o), r.u64_le(o + 8)) else { break };
-            let addend = if is_rela { r.u64_le(o + 16).map(|v| v as i64).unwrap_or(0) } else { 0 };
+            let Some(record) = r.slice(o, minimum) else {
+                warnings.push("the ELF relocation table is truncated".into());
+                break;
+            };
+            let record = Reader::new(record);
+            let (Some(r_offset), Some(r_info)) = (record.u64_le(0), record.u64_le(8)) else { break };
+            let addend = if is_rela { record.u64_le(16).unwrap_or(0) as i64 } else { 0 };
             let sym_idx = (r_info >> 32) as usize;
             let type_id = (r_info & 0xffff_ffff) as u32;
             // Resolve the referenced symbol name from the relocation's symbol table.
@@ -533,6 +543,28 @@ fn read_str(table: &[u8], idx: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relocations_require_complete_records_and_respect_the_stride() {
+        let mut elf = craft_anything_testkit::sbpf::program();
+        let table = u64::from_le_bytes(elf[40..48].try_into().unwrap()) as usize;
+        let sh = table + 4 * 64;
+        let original = u64::from_le_bytes(elf[sh + 24..sh + 32].try_into().unwrap()) as usize;
+        let record = elf[original..original + 24].to_vec();
+        let end = elf.len();
+        elf[sh + 24..sh + 32].copy_from_slice(&(end as u64).to_le_bytes());
+        elf.extend_from_slice(&record[..16]);
+        assert!(inspect(&elf).unwrap().relocations.is_empty());
+        elf.extend_from_slice(&record[16..]);
+        elf.extend([0xcc; 8]);
+        elf.extend_from_slice(&record);
+        elf.extend([0xcc; 8]);
+        elf[sh + 32..sh + 40].copy_from_slice(&64u64.to_le_bytes());
+        elf[sh + 56..sh + 64].copy_from_slice(&32u64.to_le_bytes());
+        let relocs = inspect(&elf).unwrap().relocations;
+        assert_eq!(relocs.len(), 2);
+        assert_eq!(relocs[0], relocs[1]);
+    }
 
     #[test]
     fn murmur_matches_known_vectors() {
