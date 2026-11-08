@@ -90,7 +90,7 @@ pub fn scan<'a>(src: &'a str, max_tokens: usize, mut emit: impl FnMut(Token<'a>)
             while let Some(&d) = b.get(i) {
                 i += 1;
                 if d == b'\\' {
-                    i += 1;
+                    i += if b.get(i) == Some(&b'\r') && b.get(i + 1) == Some(&b'\n') { 2 } else { 1 };
                 } else if d == c || d == b'\n' {
                     break;
                 }
@@ -310,6 +310,13 @@ mod tests {
 
     fn kinds(s: &str) -> Vec<(TokKind, String)> {
         tokenize(s, 1000).0.into_iter().map(|t| (t.kind, t.text.to_string())).collect()
+    }
+
+    #[test]
+    fn crlf_line_continuation_stays_in_string() {
+        let k = kinds("x = 'a\\\r\nb';");
+        assert!(k.contains(&(TokKind::Str, "'a\\\r\nb'".into())), "{k:?}");
+        assert!(k.contains(&(TokKind::Punct, ";".into())), "{k:?}");
     }
 
     #[test]
