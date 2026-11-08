@@ -91,7 +91,14 @@ fn program_in(config: &BackendConfig, options: &BackendOptions, search: Option<s
     // A saved `claude`, by name or as the desktop app's own file, is looked up as the usual one is,
     // so it never starts the desktop app.
     let named_claude = bare && path.file_stem().is_some_and(|s| s.eq_ignore_ascii_case(&usual));
-    if local && usual == "claude" && (named_claude || is_claude_desktop(path)) {
+    if local && usual == "claude" && (named_claude || leads_to_claude_desktop(path)) {
+        // A name saved on purpose (`claude.cmd`, a wrapper) is kept when it starts Claude Code itself.
+        if named_claude
+            && let Some(found) = craft_anything_platform::which::which_in(chosen, search.clone()).into_iter().next()
+            && !leads_to_claude_desktop(&found)
+        {
+            return Ok(chosen.to_string());
+        }
         return match usual_program(&usual, search)? {
             Some(program) => Ok(program),
             None if bare => Ok(chosen.to_string()),
@@ -148,7 +155,12 @@ fn desktop_cli(program: &str, local_data: Option<&Path>) -> Option<PathBuf> {
 }
 
 fn find_program_in(program: &str, path: Option<std::ffi::OsString>) -> Option<PathBuf> {
-    craft_anything_platform::which::which_in(program, path).into_iter().find(|p| program != "claude" || !is_claude_desktop(p))
+    craft_anything_platform::which::which_in(program, path).into_iter().find(|p| program != "claude" || !leads_to_claude_desktop(p))
+}
+
+/// [`is_claude_desktop`] for the file itself or, when it's a link, the file it leads to.
+fn leads_to_claude_desktop(path: &Path) -> bool {
+    is_claude_desktop(path) || std::fs::canonicalize(path).is_ok_and(|target| is_claude_desktop(&target))
 }
 
 /// A file inside the Claude desktop app, which can't build: its older installer names the app
@@ -1302,7 +1314,7 @@ mod tests {
         let saved = |c: &str| BackendOptions { command: Some(c.into()), ..Default::default() };
         let (by_name, the_app) = (saved(file), saved(&app.display().to_string()));
         assert_eq!(program_in(&claude, &by_name, path(&[app_dir, cli_dir])).unwrap(), real, "a saved name, the app first");
-        assert_eq!(program_in(&claude, &by_name, path(&[cli_dir, app_dir])).unwrap(), "claude", "a saved name that starts the real one");
+        assert_eq!(program_in(&claude, &by_name, path(&[cli_dir, app_dir])).unwrap(), file, "a saved name that starts the real one is kept");
         assert_eq!(program_in(&claude, &by_name, path(&[app_dir])).unwrap_err().code, ErrorCode::EngineMissing);
         assert_eq!(program_in(&claude, &by_name, path(&[])).unwrap(), file, "nothing found: the saved name, so the run says so");
         assert_eq!(program_in(&claude, &the_app, path(&[app_dir, cli_dir])).unwrap(), real, "the app's own file saved: the real one");
@@ -1310,6 +1322,34 @@ mod tests {
         assert!(err.code == ErrorCode::EngineMissing && err.message.contains("desktop app"), "{}", err.message);
         let saved_cli = saved(&cli.display().to_string());
         assert_eq!(program_in(&claude, &saved_cli, path(&[app_dir])).unwrap(), real, "a saved real path is kept");
+        // A wrapper saved by name (`claude.cmd`) stays, though another real `claude` comes first
+        // (review of #1036).
+        let wrapper = d.path().join("wrap").join(if cfg!(windows) { "claude.cmd" } else { "claude.sh" });
+        std::fs::create_dir_all(wrapper.parent().unwrap()).unwrap();
+        std::fs::write(&wrapper, b"").unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&wrapper, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let wrapper_name = wrapper.file_name().unwrap().to_string_lossy().to_string();
+        let wrap_dir = wrapper.parent().unwrap();
+        assert_eq!(program_in(&claude, &saved(&wrapper_name), path(&[cli_dir, wrap_dir])).unwrap(), wrapper_name);
+        assert_eq!(program_in(&claude, &saved(&wrapper_name), path(&[app_dir, wrap_dir])).unwrap(), wrapper_name, "the app doesn't hide it");
+        // A link to the desktop app is the desktop app (review of #1036). Making a link may need
+        // rights Windows doesn't give everyone; then there's nothing to check.
+        let link_dir = d.path().join("links");
+        std::fs::create_dir_all(&link_dir).unwrap();
+        let link = link_dir.join(file);
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&app, &link).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(&app, &link).is_ok();
+        if made {
+            assert_eq!(find_program_in("claude", path(&[&link_dir, cli_dir])), Some(cli.clone()), "the link is passed over");
+            assert_eq!(program_in(&claude, &none, path(&[&link_dir, cli_dir])).unwrap(), real);
+            assert_eq!(program_in(&claude, &none, path(&[&link_dir])).unwrap_err().code, ErrorCode::EngineMissing);
+            let saved_link = saved(&link.display().to_string());
+            assert_eq!(program_in(&claude, &saved_link, path(&[cli_dir])).unwrap(), "claude", "a saved link to the app: the name starts the real one");
+            assert_eq!(program_in(&claude, &saved_link, path(&[app_dir, cli_dir])).unwrap(), real, "a saved link to the app, the app first");
+        }
         // Another agent's program in such a folder is only filtered for Claude.
         let other = app_dir.join(if cfg!(windows) { "codex.exe" } else { "codex" });
         std::fs::write(&other, b"").unwrap();
