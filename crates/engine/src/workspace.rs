@@ -391,6 +391,10 @@ pub struct Manifest {
     /// this was kept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session_by: Option<String>,
+    /// The mode `agent_session` was saved in (`true`: Deep); none: saved before the mode was
+    /// kept, so it is only resumed in Deep (it may have read the original there).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_session_deep: Option<bool>,
     /// Kinds of agent action the person allowed for this workspace ("bash:npm", "web_fetch"…).
     #[serde(default)]
     pub allowed_actions: Vec<String>,
@@ -461,6 +465,7 @@ impl Manifest {
             checks: Vec::new(),
             agent_session: None,
             agent_session_by: None,
+            agent_session_deep: None,
             allowed_actions: Vec::new(),
             last_reply: String::new(),
             asset_budget_usd: ASSET_BUDGET_USD,
@@ -479,6 +484,12 @@ impl Manifest {
     /// continue it (#469). One saved before the agent was kept counts.
     pub fn agent_session_for(&self, agent: &str) -> Option<&str> {
         self.agent_session.as_deref().filter(|_| self.agent_session_by.as_deref().is_none_or(|a| a == agent))
+    }
+
+    /// The session `agent` saved in this mode. One saved before the mode was kept counts as
+    /// Deep: resuming it in Clean room could carry what it read there.
+    pub fn agent_session_for_mode(&self, agent: &str, deep: bool) -> Option<&str> {
+        self.agent_session_for(agent).filter(|_| self.agent_session_deep.unwrap_or(true) == deep)
     }
 
     /// Take the fields the person owns from `other` (what's on disk).
@@ -1839,8 +1850,17 @@ mod tests {
         m.agent_session_by = Some("claude-code".into());
         assert_eq!(m.agent_session_for("claude-code"), Some("s1"));
         assert_eq!(m.agent_session_for("codex"), None);
+        assert_eq!(m.agent_session_for_mode("claude-code", true), Some("s1"), "one saved before the mode was kept counts as Deep");
+        assert_eq!(m.agent_session_for_mode("claude-code", false), None, "Deep may have read the original, so Clean room starts fresh");
+        m.agent_session_deep = Some(false);
+        assert_eq!(m.agent_session_for_mode("claude-code", false), Some("s1"));
+        assert_eq!(m.agent_session_for_mode("claude-code", true), None);
+        m.agent_session_deep = Some(true);
+        assert_eq!(m.agent_session_for_mode("claude-code", true), Some("s1"));
+        m.agent_session_deep = None;
         let text = serde_json::to_string(&m).unwrap();
-        assert_eq!(serde_json::from_str::<Manifest>(&text).unwrap().agent_session_by.as_deref(), Some("claude-code"));
+        let back: Manifest = serde_json::from_str(&text).unwrap();
+        assert_eq!((back.agent_session_by.as_deref(), back.agent_session_deep), (Some("claude-code"), None));
     }
 
     /// A rename survives a stale save, a copy takes the build but not the conversation (nor its

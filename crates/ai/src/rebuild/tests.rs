@@ -592,7 +592,7 @@ mod typed_retries {
             let mut agent = FailingConversation::new([Some(failure), None], saved);
             agent.message = "Authentication and billing service restarting. Please retry in 90s.";
             let mut waits = Vec::new();
-            let result = worker.turn_with_wait(&mut ws, &mut agent, "Build the requested app", None, |_, seconds| {
+            let result = worker.turn_with_wait(&mut ws, &mut agent, "Build the requested app", true, None, |_, seconds| {
                 waits.push(seconds);
                 Ok(())
             });
@@ -619,7 +619,7 @@ mod typed_retries {
             let mut worker = check_worker(&ws, false);
             let mut agent = FailingConversation::new([Some(TurnFailure::new(kind))], true);
             agent.message = "需要修改设置。Please retry in 1s.";
-            let result = worker.turn_with_wait(&mut ws, &mut agent, "Build it", None, |_, _| panic!("a setup error must not wait and retry"));
+            let result = worker.turn_with_wait(&mut ws, &mut agent, "Build it", true, None, |_, _| panic!("a setup error must not wait and retry"));
             assert!(result.is_err(), "{kind:?}");
             assert_eq!(agent.sent.len(), 1, "{kind:?}");
         }
@@ -636,7 +636,7 @@ mod typed_retries {
         let mut waits = Vec::new();
         assert!(
             worker
-                .turn_with_wait(&mut ws, &mut agent, "Build it", None, |_, seconds| {
+                .turn_with_wait(&mut ws, &mut agent, "Build it", true, None, |_, seconds| {
                     waits.push(seconds);
                     Ok(())
                 })
@@ -646,7 +646,7 @@ mod typed_retries {
         assert_eq!(waits, [30, 60, 90]);
         let mut agent = FailingConversation::new([Some(failure)], false);
         let error = worker
-            .turn_with_wait(&mut ws, &mut agent, "Build it", None, |stop, _| {
+            .turn_with_wait(&mut ws, &mut agent, "Build it", true, None, |stop, _| {
                 stop.cancel();
                 stop.check()
             })
@@ -726,7 +726,7 @@ mod typed_retries {
         let mut agent = RateLimited { sent: 0, first_poll: false };
         let mut waits = Vec::new();
         let error = worker
-            .turn_with_wait(&mut ws, &mut agent, "Build the app", None, |_, seconds| {
+            .turn_with_wait(&mut ws, &mut agent, "Build the app", true, None, |_, seconds| {
                 waits.push(seconds);
                 Ok(())
             })
@@ -769,7 +769,7 @@ mod typed_retries {
             let mut waits = Vec::new();
             assert_eq!(
                 worker
-                    .turn_with_wait(&mut ws, &mut api, "Build the notes app", None, |_, seconds| {
+                    .turn_with_wait(&mut ws, &mut api, "Build the notes app", true, None, |_, seconds| {
                         waits.push(seconds);
                         Ok(())
                     })
@@ -830,7 +830,7 @@ mod typed_retries {
                 "sleep 5\nprintf 'unreachable' > continued-without-tools\n"
             ),
         );
-        let error = worker.turn_with_wait(&mut ws, &mut cli, "Build the app", None, |_, _| panic!("missing tools must not be retried")).unwrap_err();
+        let error = worker.turn_with_wait(&mut ws, &mut cli, "Build the app", true, None, |_, _| panic!("missing tools must not be retried")).unwrap_err();
         assert!(error.message.contains("tools did not start"), "{error:?}");
         assert_eq!(cli.last_failure().unwrap().kind, FailureKind::ToolsUnavailable);
         assert!(!cli.is_busy());
@@ -859,7 +859,7 @@ mod typed_retries {
             ),
         );
         let mut waits = Vec::new();
-        let result = worker.turn_with_wait(&mut ws, &mut cli, "Make a notes app", None, |_, seconds| {
+        let result = worker.turn_with_wait(&mut ws, &mut cli, "Make a notes app", true, None, |_, seconds| {
             waits.push(seconds);
             Ok(())
         });
@@ -885,7 +885,7 @@ mod typed_retries {
             let error = json!({"type":"assistant","error":code,"message":{"content":[{"type":"text","text":"Please retry in 1s."}]}});
             let script = format!("#!/bin/sh\ncat >/dev/null\nprintf 'attempt\\n' >> attempts\nprintf '%s\\n' '{error}'\nexit 1\n");
             let mut cli = executable_cli(&ws, "claude-code", &script);
-            let result = worker.turn_with_wait(&mut ws, &mut cli, "Make a notes app", None, |_, _| panic!("typed setup failures must not retry"));
+            let result = worker.turn_with_wait(&mut ws, &mut cli, "Make a notes app", true, None, |_, _| panic!("typed setup failures must not retry"));
             assert!(result.is_err(), "{kind:?}");
             assert_eq!(cli.last_failure().unwrap().kind, kind);
             assert_eq!(std::fs::read_to_string(ws.root.join("attempts")).unwrap(), "attempt\n");
@@ -915,7 +915,7 @@ mod typed_retries {
         let mut waits = Vec::new();
         assert_eq!(
             worker
-                .turn_with_wait(&mut ws, &mut cli, "Make a notes app", None, |_, seconds| {
+                .turn_with_wait(&mut ws, &mut cli, "Make a notes app", true, None, |_, seconds| {
                     waits.push(seconds);
                     Ok(())
                 })
@@ -943,7 +943,7 @@ mod typed_retries {
         );
         let mut waits = Vec::new();
         let error = worker
-            .turn_with_wait(&mut ws, &mut cli, "Make a notes app", None, |_, seconds| {
+            .turn_with_wait(&mut ws, &mut cli, "Make a notes app", true, None, |_, seconds| {
                 waits.push(seconds);
                 Ok(())
             })
@@ -1241,7 +1241,7 @@ fn an_api_backend_builds_with_the_build_tools() {
     let slot = ModelSlot { name: "Scripted".into(), model: Box::new(script), local: false, effort: None, max_turns: 10, context_tokens: 0 };
     let enabled = std::collections::BTreeSet::from([craft_anything_engine::Toolset::Core, craft_anything_engine::Toolset::Build]);
     let mut api = ApiConversation::start_with(Arc::new(EngineHost(engine)), vec![slot], LoopConfig::default(), enabled).unwrap();
-    let reply = w.turn(&mut ws, &mut api, "Build it.", None).unwrap();
+    let reply = w.turn(&mut ws, &mut api, "Build it.", true, None).unwrap();
     assert_eq!(reply.trim(), "Built the notes app.");
     assert_eq!(std::fs::read_to_string(ws.app_dir().join("README.md")).unwrap(), "# Notes\n");
     assert!(ws.manifest.agent_session.is_none(), "an API loop has no session to resume");
@@ -2105,6 +2105,47 @@ mod picking_up_a_build {
         assert_eq!(Workspace::open(&ws.root).unwrap().manifest.agent_session.as_deref(), Some("session-1"));
     }
 
+    /// R2.9: a session saved in one mode is never continued in the other — a Clean room build
+    /// must not carry what a Deep one read — and one saved before the mode was kept counts as
+    /// Deep, so only Deep continues it.
+    #[test]
+    fn a_session_from_another_mode_is_not_continued() {
+        for (saved, deep, continued) in [
+            (Some(true), true, true),
+            (Some(true), false, false),
+            (Some(false), false, true),
+            (Some(false), true, false),
+            (None, true, true),
+            (None, false, false),
+        ] {
+            let b = bench();
+            let mut ws = worked_on(&b);
+            ws.manifest.agent_session_deep = saved;
+            ws.save().unwrap();
+            b.hub.engine.session().settings.deep_mode = deep;
+            let (ok, feed) = try_it(&b, &ws);
+            assert!(ok, "saved={saved:?}, deep={deep}: {feed:?}");
+            let told = std::fs::read_to_string(&b.prompts).unwrap();
+            assert_eq!(told.contains("Pick up where you left off"), continued, "saved={saved:?}, deep={deep}: {told}");
+            assert_eq!(told.contains("Their request"), !continued, "a fresh start gets the brief: {told}");
+        }
+    }
+
+    #[test]
+    fn a_session_is_kept_with_the_mode_it_ran_in() {
+        let d = tempfile::tempdir().unwrap();
+        let mut ws = Workspace::create(d.path(), "x", "A thing", TargetRef::None).unwrap();
+        Worker::remember_session(&mut ws, Some("s1".into()), false).unwrap();
+        let m = Workspace::open(&ws.root).unwrap().manifest;
+        assert_eq!((m.agent_session.as_deref(), m.agent_session_deep), (Some("s1"), Some(false)));
+        Worker::remember_session(&mut ws, Some("s2".into()), true).unwrap();
+        let m = Workspace::open(&ws.root).unwrap().manifest;
+        assert_eq!((m.agent_session.as_deref(), m.agent_session_deep), (Some("s2"), Some(true)));
+        Worker::remember_session(&mut ws, None, true).unwrap();
+        let m = Workspace::open(&ws.root).unwrap().manifest;
+        assert_eq!((m.agent_session, m.agent_session_deep), (None, None), "a lost session leaves no mode behind");
+    }
+
     #[test]
     fn a_new_project_still_starts_from_the_top() {
         let b = bench();
@@ -2764,7 +2805,7 @@ fn the_run_answers_the_builders_own_check_during_its_turn() {
         reset_progress_after_notes: false,
     };
     let mut builder = ChecksItsWork { root: ws.root.clone(), asked: None, reply: None };
-    let reply = w.turn(&mut ws, &mut builder, "Build it.", None).unwrap();
+    let reply = w.turn(&mut ws, &mut builder, "Build it.", true, None).unwrap();
     // The same check the run makes after a turn, as round 0, with what to do next.
     assert!(reply.starts_with("mechanics: failed") && reply.contains("no app/mechanics.json") && reply.contains("check again with rebuild_check"), "{reply}");
     assert!(ws.manifest.checks.is_empty(), "the builder's own check isn't a round");
@@ -3265,7 +3306,7 @@ fn a_session_left_on_another_computer_starts_a_new_one_from_the_project() {
         reset_progress_after_notes: false,
     };
     let first = resumed_elsewhere("THE BRIEF", &ws.manifest.last_reply, None);
-    let reply = w.turn(&mut ws, &mut agent, "The person asks: make it blue", Some(first)).unwrap();
+    let reply = w.turn(&mut ws, &mut agent, "The person asks: make it blue", true, Some(first)).unwrap();
     assert_eq!(reply.trim(), "Carried on: yes");
     let sent = std::fs::read_to_string(bin.path().join("claude.last")).unwrap();
     assert!(
@@ -3319,7 +3360,9 @@ fn a_missing_session_with_nothing_to_start_from_is_said_plainly() {
         self_check: None,
         reset_progress_after_notes: false,
     };
-    let e = w.turn_with_wait(&mut ws, &mut agent, "Carry on.", None, |_, _| panic!("a missing session without a fresh start must not be retried")).unwrap_err();
+    let e = w
+        .turn_with_wait(&mut ws, &mut agent, "Carry on.", true, None, |_, _| panic!("a missing session without a fresh start must not be retried"))
+        .unwrap_err();
     assert!(e.message.contains("isn't on this computer"), "{e:?}");
     assert!(ws.manifest.agent_session.is_none());
 }
