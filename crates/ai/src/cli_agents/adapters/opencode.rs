@@ -100,8 +100,41 @@ impl AgentAdapter for OpenCode {
         false
     }
 
+    /// A turn stopped part-way stays `running` in OpenCode's storage, and its shared service picks
+    /// it up the next time it starts and runs the builder's commands again (#1115, seen with 2.2.5).
+    /// A private server deletes it without resuming it. Short: the turn waits for it before it ends.
+    fn discard_unfinished(&self, program: &str, id: &str) -> Result<(), ToolError> {
+        // From the agent's output: one read as a flag would delete nothing, or something else.
+        if id.is_empty() || id.starts_with('-') {
+            return Err(ToolError::invalid(format!("OpenCode named its session {id:?}, which can't be passed to `opencode session delete`."))
+                .with_remediation("Find it with `opencode session list` and delete it with `opencode session delete --standalone <id>`."));
+        }
+        // With --standalone, as here: without it, the command may start the shared service, which resumes it.
+        // Said for every failure (a time limit here isn't a setting the person can raise).
+        let by_hand = format!("Delete it yourself with `opencode session delete --standalone {id}`, so OpenCode doesn't pick it up again.");
+        let out = self
+            .process(program)
+            .args(["session", "delete", "--standalone", id])
+            .timeout(std::time::Duration::from_secs(30))
+            .stdout_cap(64 * 1024)
+            .run()
+            .map_err(|e| e.with_remediation(by_hand.clone()))?;
+        if out.success {
+            Ok(())
+        } else {
+            Err(ToolError::new(
+                ErrorCode::ProgramFailed,
+                format!("opencode session delete exited with {}", out.code.map_or("no code".into(), |c| c.to_string())),
+            )
+            .with_remediation(by_hand))
+        }
+    }
+
     fn parse(&self, p: &mut StreamParser, v: &Value) -> Vec<AgentEvent> {
         let mut events = Vec::new();
+        if p.run_session.is_none() {
+            p.run_session = v.get("sessionID").and_then(Value::as_str).map(str::to_string);
+        }
         let part = v.get("part").unwrap_or(&Value::Null);
         match v.get("type").and_then(Value::as_str) {
             Some("text") => {
@@ -310,9 +343,11 @@ mod tests {
             json!({"type":"text","part":{"text":"Built a page"}}),
             json!({"type":"tool_use","part":{"callID":"write-1","tool":"write","state":{"status":"completed","input":{"path":"index.html"},"output":"wrote the page"}}}),
             json!({"type":"step_finish","part":{"tokens":{"input":10,"output":5,"reasoning":2,"cache":{"read":3,"write":1}},"cost":0.01}}),
-            json!({"type":"step_finish","part":{"tokens":{"input":1,"output":2},"cost":0.02}}),
+            json!({"type":"step_finish","sessionID":"another","part":{"tokens":{"input":1,"output":2},"cost":0.02}}),
         ];
         let events: Vec<_> = lines.iter().flat_map(|v| p.line(&v.to_string())).collect();
+        // #1115: kept so an unfinished turn's session can be deleted, the first one it named.
+        assert_eq!(p.run_session.as_deref(), Some("reported-but-not-resumable"));
         assert!(
             matches!(events.as_slice(), [AgentEvent::TextDelta { text }, AgentEvent::ToolStarted { tool, .. }, AgentEvent::ToolFinished { ok:true, .. }] if text=="Built a page" && tool=="write")
         );
@@ -475,6 +510,20 @@ mod tests {
     }
 
     /// Every supported depth reaches native chat and builder runs in the selected model reference.
+    #[test]
+    fn a_session_id_that_reads_as_a_flag_is_refused_before_anything_runs() {
+        // No such program: had it been started, the error would say it wasn't found.
+        for id in ["", "-h", "--all"] {
+            let e = OpenCode.discard_unfinished("no-such-opencode-here", id).unwrap_err();
+            assert_eq!(e.code, ErrorCode::BadInput, "{id:?}: {e:?}");
+            assert!(e.remediation.unwrap_or_default().contains("--standalone"), "the manual command doesn't wake the shared service");
+        }
+        // A delete that couldn't run says how to do it by hand, not the process runner's own advice.
+        let e = OpenCode.discard_unfinished("no-such-opencode-here", "ses_1").unwrap_err();
+        assert_ne!(e.code, ErrorCode::BadInput, "{e:?}");
+        assert!(e.remediation.as_deref().unwrap_or_default().contains("opencode session delete --standalone ses_1"), "{e:?}");
+    }
+
     #[test]
     fn thinking_depth_is_part_of_the_selected_model_reference() {
         for depth in crate::Effort::ALL {
