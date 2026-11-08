@@ -59,14 +59,26 @@ pub struct Host {
 
 impl Host {
     /// The real machine: the user's home and only the config-related environment variables.
+    /// An explicitly empty `CRAFT_ANYTHING_CONFIG_DIR` is kept; see `capture_env`.
     pub fn current() -> Host {
         let home = std::env::var_os("HOME")
             .filter(|h| !h.is_empty())
             .or_else(|| std::env::var_os("USERPROFILE"))
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
-        let env = ENV_KEYS.iter().filter_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()).map(|v| (k.to_string(), v))).collect();
+        let env = Self::capture_env(ENV_KEYS.iter().filter_map(|k| std::env::var(k).ok().map(|v| (*k, v))));
         Host { home, env, os: Os::current() }
+    }
+
+    /// The config-related environment variables for this host, from
+    /// `(key, value)` pairs. An explicitly empty `CRAFT_ANYTHING_CONFIG_DIR`
+    /// is kept: the engine treats it as the working directory, so dropping it
+    /// would make uninstall fix the platform config while the app uses
+    /// another one. Every other empty value is dropped, since for those keys
+    /// empty means unset. Kept as a pure function so the rule is testable
+    /// without touching the process environment.
+    pub(crate) fn capture_env(pairs: impl Iterator<Item = (&'static str, String)>) -> BTreeMap<String, String> {
+        pairs.filter(|(k, v)| *k == "CRAFT_ANYTHING_CONFIG_DIR" || !v.is_empty()).map(|(k, v)| (k.to_string(), v)).collect()
     }
 
     /// A host rooted at `home` with no environment overrides (tests).
@@ -106,10 +118,13 @@ impl Host {
     /// Where the app's own `config.toml` lives: `CRAFT_ANYTHING_CONFIG_DIR`,
     /// then a portable `portable.txt` marker next to the executable, then the
     /// platform config dir — the same order as `Settings::path()` in the
-    /// engine, so uninstall neutralizes the file the app actually loads. A
-    /// host with no environment (tests) falls through to the platform dir.
+    /// engine, so uninstall neutralizes the file the app actually loads. An
+    /// explicitly empty `CRAFT_ANYTHING_CONFIG_DIR` is kept: the engine treats
+    /// it as the working directory, so the config there is the live one, not
+    /// the platform fallback. A host with no environment (tests) falls through
+    /// to the platform dir.
     pub fn settings_path(&self) -> PathBuf {
-        if let Some(dir) = self.env.get("CRAFT_ANYTHING_CONFIG_DIR").filter(|v| !v.is_empty()) {
+        if let Some(dir) = self.env.get("CRAFT_ANYTHING_CONFIG_DIR") {
             return PathBuf::from(dir).join("config.toml");
         }
         if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()))
