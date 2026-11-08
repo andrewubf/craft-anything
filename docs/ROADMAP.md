@@ -1067,6 +1067,17 @@ Gaps found while using the app for real projects.
       default fonts: without craft-fonts they show as boxes, and with it each such letter comes from
       Noto Sans CJK while the rest of the word is DM Sans. Bundle a DM Sans build that has the
       Vietnamese set (with its OFL notice) so Tiếng Việt renders in one face
+- [x] An Arabic UI that reads right to left: a full `ar` catalog, Arabic sentences in their right
+      word order (egui 0.36 shapes each word but lays words out left to right), and the window
+      mirrored (sidebar on the right, rows from the right)
+      — claimed: SoldierPePe, branch feature/r2.9-arabic-rtl; PR #868
+- [ ] Right to left, egui's `Grid` (workbench Selection and Target details, Settings → Engines tool
+      paths, tool forms, the Approvals menu) stays left to right: it has no right-to-left layout. Rows
+      instead of a grid, or right-to-left support in the egui fork
+- [ ] Check the Arabic window live on macOS and Linux (only Windows and offscreen snapshots so far)
+- [ ] Text the engine and the rebuild workflow write stays English in every UI language: a
+      project's progress lines ("Building the first version…"), check results, AI options found
+      at first run, error messages. Give them typed ids (or catalog keys) the UI translates
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
