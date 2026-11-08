@@ -241,6 +241,19 @@ pub trait AgentAdapter: Send + Sync {
     fn in_folder(&self, _folder: std::path::PathBuf) -> Option<Arc<dyn AgentAdapter>> {
         None
     }
+    /// Remove session `id` that a turn run with `program` left unfinished (stopped, failed or timed
+    /// out), so nothing the agent keeps running in the background picks it up again and goes on
+    /// working after we stopped it (#1115). `host`: the SSH host it ran on, None for this computer.
+    /// Default: this agent leaves nothing that resumes by itself.
+    fn discard_unfinished(&self, _program: &str, _id: &str, _host: Option<&str>) -> Result<(), ToolError> {
+        Ok(())
+    }
+    /// Whether [`discard_unfinished`](Self::discard_unfinished) really deletes sessions. Only then
+    /// is a turn's session recorded for a later sweep, and only then does a sweep take a record's
+    /// session as deleted (the default's `Ok` deletes nothing).
+    fn discards_sessions(&self) -> bool {
+        false
+    }
 }
 
 /// The adapters a run can use.

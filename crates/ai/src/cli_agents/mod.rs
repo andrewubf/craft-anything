@@ -12,6 +12,7 @@ pub mod acp;
 pub mod adapters;
 pub mod models;
 mod shared;
+pub mod unfinished;
 
 pub(crate) use shared::SharedConversation;
 
@@ -432,6 +433,10 @@ fn standalone(program: &str) -> Process {
 pub struct StreamParser {
     adapter: Arc<dyn AgentAdapter>,
     pub session_id: Option<String>,
+    /// The agent's own session for this run, kept even when it can't be resumed
+    /// ([`AgentAdapter::resumes`]), so a turn that doesn't finish can be cleaned up
+    /// ([`AgentAdapter::discard_unfinished`]).
+    pub run_session: Option<String>,
     pub tool_names: HashMap<String, String>,
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -481,6 +486,7 @@ impl StreamParser {
         StreamParser {
             adapter,
             session_id: None,
+            run_session: None,
             tool_names: HashMap::new(),
             input_tokens: 0,
             output_tokens: 0,
@@ -942,6 +948,22 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
     };
     let _ =
         tx.send(AgentEvent::Status { text: format!("Asking {}{}…", display_for(&agent), remote.as_ref().map(|h| format!(" on {h}")).unwrap_or_default()) });
+    // Sessions earlier turns left behind when Craft Anything was killed mid-turn (#1115). Off this
+    // thread: a delete over SSH may wait on a host that's away.
+    let records = spec.logs.as_deref().map(unfinished::dir_in);
+    if let Some(dir) = records.clone() {
+        let (adapters, tx3) = (spec.adapters.clone(), tx.clone());
+        let _ = std::thread::Builder::new().name("unfinished-sessions".into()).spawn(move || {
+            for text in unfinished::sweep(&dir, &adapters) {
+                let _ = tx3.send(AgentEvent::Status { text });
+            }
+        });
+    }
+    // This turn's own session, recorded once the agent names it, for a sweep if we're killed.
+    let records = records.filter(|_| adapter.discards_sessions());
+    // Some once tried, recorded or not.
+    let held: Arc<Mutex<Option<Option<unfinished::Held>>>> = Arc::new(Mutex::new(None));
+    let (held2, agent2, program2, host2) = (held.clone(), agent.clone(), program.clone(), remote.clone());
     let parser = Arc::new(Mutex::new(StreamParser::new(adapter.clone())));
     let (p2, tx2, tx_err, lost2, failure2) = (parser.clone(), tx.clone(), tx.clone(), lost.clone(), failure.clone());
     let failed_tools = Arc::new(AtomicBool::new(false));
@@ -963,6 +985,12 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
             }
             let mut p = p2.lock().unwrap_or_else(PoisonError::into_inner);
             let events = p.line(l);
+            if let (Some(dir), Some(id)) = (&records, &p.run_session) {
+                let mut h = held2.lock().unwrap_or_else(PoisonError::into_inner);
+                if h.is_none() {
+                    *h = Some(unfinished::Held::record(dir, &unfinished::Entry::new(&agent2, &program2, host2.as_deref(), id)).ok());
+                }
+            }
             // Said before the error that follows it, so whoever reads the error can tell.
             if p.session_missing {
                 lost2.store(true, Ordering::SeqCst);
@@ -1005,6 +1033,10 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
         };
         *failure.lock().unwrap_or_else(PoisonError::into_inner) = failed;
     }
+    let unfinished = match &result {
+        Ok(out) => !out.success,
+        Err(_) => true,
+    };
     match result {
         // The protocol already named the required tool server. Stop the owned process without
         // replacing that useful error with the cancellation used to stop it.
@@ -1035,6 +1067,24 @@ fn run_cli(spec: &CliSpec, text: &str, retry: bool, tx: &Sender<AgentEvent>, sto
         Err(e) => {
             let _ = tx.send(shown.error_event(&agent, e));
         }
+    }
+    // #1115: a turn that didn't finish leaves its session marked as running, and the agent's
+    // background service may pick it up later and carry on with nobody watching.
+    let held = held.lock().unwrap_or_else(PoisonError::into_inner).take().flatten();
+    let gone = match &p.run_session {
+        Some(id) if unfinished => match adapter.discard_unfinished(&program, id, remote.as_deref()) {
+            Ok(()) => true,
+            Err(e) => {
+                let fix = e.remediation.map(|r| format!(" {r}")).unwrap_or_default();
+                let _ = tx.send(AgentEvent::Status { text: format!("Couldn't remove {}'s unfinished session {id}: {}.{fix}", display_for(&agent), e.message) });
+                false
+            }
+        },
+        _ => true,
+    };
+    // Kept (unlocked) when the delete failed, so a later sweep tries again.
+    if gone && let Some(h) = held {
+        h.done();
     }
     AgentEvent::TurnDone { backend: name, input_tokens: p.input_tokens, output_tokens: p.output_tokens, cost_usd: p.cost_usd, cost_is_estimate: true }
 }
@@ -1490,6 +1540,96 @@ mod tests {
         std::fs::write(&cli, b"").unwrap();
         assert_eq!(desktop_cli("opencode", Some(d.path())), Some(cli));
         assert_eq!(desktop_cli("codex", Some(d.path())), None, "only the agents listed");
+    }
+
+    const UNFINISHED_CHILD_ENV: &str = "CRAFT_ANYTHING_TEST_UNFINISHED_CHILD";
+
+    /// The stand-in agent of `a_stopped_turn_discards_its_session`: it names its session in
+    /// OpenCode's format, then finishes or hangs as told. Run as an ordinary test, it does nothing.
+    #[test]
+    fn unfinished_child() {
+        let Some(how) = std::env::var_os(UNFINISHED_CHILD_ENV) else { return };
+        // On a line of its own: libtest has already written "test … ... " without a line break.
+        println!("\n{}", json!({"type":"text","sessionID":"ses_child","part":{"text":"working"}}));
+        std::io::Write::flush(&mut std::io::stdout()).unwrap();
+        if how == "hang" {
+            std::thread::sleep(Duration::from_secs(60));
+        }
+    }
+
+    /// #1115: a turn stopped part-way removes the session it started, so the agent's background
+    /// service can't pick it up again; a turn that finishes leaves its session alone.
+    #[test]
+    fn a_stopped_turn_discards_its_session() {
+        struct StandIn {
+            how: &'static str,
+            discarded: Arc<Mutex<Vec<String>>>,
+        }
+        impl AgentAdapter for StandIn {
+            /// Register the fixture without replacing any built-in agent.
+            fn ids(&self) -> &'static [&'static str] {
+                &["test-unfinished"]
+            }
+            /// Run only `unfinished_child` in this test program.
+            fn args(&self, _cx: &ArgsCx) -> Vec<String> {
+                ["--exact", "--test-threads=1", "--nocapture", "cli_agents::tests::unfinished_child"].map(String::from).to_vec()
+            }
+            fn streams_json(&self) -> bool {
+                true
+            }
+            /// Tell the child how to behave (the runner hands the agent this variable).
+            fn mcp_env(&self, _mcp: &McpCommand) -> Result<Option<(&'static str, String)>, ToolError> {
+                Ok(Some((UNFINISHED_CHILD_ENV, self.how.to_string())))
+            }
+            /// Read the stream as OpenCode's adapter does.
+            fn parse(&self, p: &mut StreamParser, v: &Value) -> Vec<AgentEvent> {
+                adapters::OpenCode.parse(p, v)
+            }
+            /// It stands in for an agent whose sessions are deleted.
+            fn discards_sessions(&self) -> bool {
+                true
+            }
+            /// Record what would be deleted.
+            fn discard_unfinished(&self, _program: &str, id: &str, _host: Option<&str>) -> Result<(), ToolError> {
+                self.discarded.lock().unwrap_or_else(PoisonError::into_inner).push(id.to_string());
+                Ok(())
+            }
+        }
+        for (how, stopped) in [("hang", true), ("finish", false)] {
+            let discarded = Arc::new(Mutex::new(Vec::new()));
+            let config = BackendConfig {
+                name: "Test".into(),
+                kind: BackendKind::AgentCli,
+                model: "test-unfinished".into(),
+                base_url: None,
+                ssh_host: None,
+                enabled: true,
+            };
+            let options = BackendOptions { command: Some(std::env::current_exe().unwrap().display().to_string()), ..Default::default() };
+            let mut spec = CliSpec::new(config, options, false, None);
+            let logs = tempfile::tempdir().unwrap();
+            spec.logs = Some(logs.path().to_path_buf());
+            spec.adapters.register(Arc::new(StandIn { how, discarded: discarded.clone() }));
+            let mut c = CliConversation::new(spec);
+            c.send("go");
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            let mut all = Vec::new();
+            while !all.iter().any(|e| matches!(e, AgentEvent::TurnDone { .. })) {
+                assert!(std::time::Instant::now() < deadline, "{how}: no TurnDone: {all:?}");
+                let got = c.poll();
+                // Stopped once it's working, as Pause does.
+                if stopped && got.iter().any(|e| matches!(e, AgentEvent::TextDelta { .. })) {
+                    c.stop();
+                }
+                all.extend(got);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let want: &[&str] = if stopped { &["ses_child"] } else { &[] };
+            assert_eq!(*discarded.lock().unwrap_or_else(PoisonError::into_inner), want, "{how}: {all:?}");
+            // Its record of the session goes once the session is deleted or finished.
+            let left = std::fs::read_dir(unfinished::dir_in(logs.path())).map(|rd| rd.flatten().count());
+            assert_eq!(left.ok(), Some(0), "{how}: the session was recorded, then its record removed");
+        }
     }
 
     /// Validation failures finish exactly once, preserving cancellation status and other error details.

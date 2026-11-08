@@ -695,6 +695,23 @@ Owner: open · Status: in progress
       kept somewhere we don't look (#1060)
 - [ ] Verify OpenCode model discovery and an explicit thinking selection on a live SSH host,
       and complete a live generation with the selected model and variant (local catalogue verified).
+- [x] A stopped, failed or killed OpenCode turn deletes its session, so OpenCode's shared service
+      can't resume it and keep running the builder's commands later (#1115). Probed live with
+      OpenCode 2.2.5 on Windows: a killed `run --standalone` session stays `running` and the
+      service resumes it; `session delete --standalone` removes it without resuming it
+      — claimed: justinjohn0306, branch bugfix/r2.2-opencode-interrupted-sessions
+- [x] When Craft Anything itself is killed mid-turn (uninstalled, a crash; closing the app during a
+      build isn't known to wait for the delete either), no turn is left to delete the OpenCode
+      session, and the service still resumes it (#1115): each turn records its session under a
+      lock the system drops when the process ends; the next agent turn and
+      `craft-anything-cli uninstall` delete the sessions of records nobody holds. Over SSH, the
+      delete runs on the host too
+      — claimed: justinjohn0306, branch bugfix/r2.2-opencode-leftover-sessions
+- [ ] Sweep leftover agent sessions when the desktop app starts, not only at the next agent turn
+      or `craft-anything-cli uninstall` (#1115)
+- [ ] A turn stopped before OpenCode's first event leaves no session id to delete: OpenCode names its
+      session only in that event, so the session it may already have made stays (#1115, review on
+      #1176). Needs a session id known before the run (one we create and pass in), if OpenCode allows it
 
 "Found on this computer" has to mean "can do the job". Today only Claude Code gets everything.
 **Every builder gets the same tools:**
