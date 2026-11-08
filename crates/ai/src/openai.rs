@@ -282,13 +282,18 @@ pub fn messages_json(m: &Msg, react: bool) -> Vec<Value> {
             if react {
                 // Calls made natively before the switch to the text protocol are written as the
                 // protocol's own lines, so the turn isn't empty and the model sees what it did.
-                if !text.contains("Action:") {
-                    for (_, name, input) in m.tool_uses() {
-                        if !text.is_empty() && !text.ends_with('\n') {
-                            text.push('\n');
-                        }
-                        text.push_str(&format!("Action: {name}\nAction Input: {input}"));
+                // A call the text already names (one `Action:` line each) isn't written twice; any
+                // other is, so its result never arrives without it.
+                let mut named: Vec<String> = text.lines().filter_map(|l| l.trim().strip_prefix("Action:")).map(|n| n.trim().to_string()).collect();
+                for (_, name, input) in m.tool_uses() {
+                    if let Some(i) = named.iter().position(|n| *n == name) {
+                        named.swap_remove(i);
+                        continue;
                     }
+                    if !text.is_empty() && !text.ends_with('\n') {
+                        text.push('\n');
+                    }
+                    text.push_str(&format!("Action: {name}\nAction Input: {input}"));
                 }
                 return if text.is_empty() { Vec::new() } else { vec![json!({"role": "assistant", "content": text})] };
             }
@@ -1101,6 +1106,21 @@ mod tests {
             ],
         };
         assert_eq!(messages_json(&written, true)[0]["content"], "Thought: look\nAction: look\nAction Input: {}");
+        // Text naming one call beside a native call of another keeps both, so no result arrives
+        // without its action; a second call to the same tool is written too.
+        let mixed = Msg {
+            role: Speaker::Assistant,
+            blocks: vec![
+                Block::Text { text: "Action: look\nAction Input: {}".into() },
+                Block::ToolUse { id: "react_0".into(), name: "look".into(), input: json!({}) },
+                Block::ToolUse { id: "c2".into(), name: "read".into(), input: json!({"p": 1}) },
+                Block::ToolUse { id: "c3".into(), name: "look".into(), input: json!({"deep": true}) },
+            ],
+        };
+        assert_eq!(
+            messages_json(&mixed, true)[0]["content"],
+            "Action: look\nAction Input: {}\nAction: read\nAction Input: {\"p\":1}\nAction: look\nAction Input: {\"deep\":true}"
+        );
         // In a whole request (text protocol), the user turns either side are joined into one.
         let user = |t: &str| Msg { role: Speaker::User, blocks: vec![Block::Text { text: t.into() }] };
         let mut o = OpenAi::compatible("Kimi", "http://127.0.0.1:9", Some("sk-test".into()), "kimi");
