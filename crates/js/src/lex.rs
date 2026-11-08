@@ -223,6 +223,11 @@ pub fn unescape(s: &str) -> String {
                 }
             }
             Some('\n') => {}
+            Some('\r') => {
+                if it.peek() == Some(&'\n') {
+                    it.next();
+                }
+            }
             Some(other) => out.push(other),
             None => {}
         }
@@ -310,6 +315,13 @@ mod tests {
 
     fn kinds(s: &str) -> Vec<(TokKind, String)> {
         tokenize(s, 1000).0.into_iter().map(|t| (t.kind, t.text.to_string())).collect()
+    }
+
+    #[test]
+    fn unescape_crlf_line_continuation() {
+        assert_eq!(unescape("a\\\r\nb"), "ab");
+        assert_eq!(unescape("a\\\rb"), "ab");
+        assert_eq!(unescape("a\\\nb"), "ab");
     }
 
     #[test]
