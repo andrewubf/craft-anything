@@ -56,15 +56,15 @@ pub fn scan<'a>(src: &'a str, max_tokens: usize, mut emit: impl FnMut(Token<'a>)
     let slice = |a: usize, z: usize| src.get(a..z).unwrap_or("");
     let mut last_sig: Option<(TokKind, &str)> = None;
     while i < b.len() {
-        if count >= max_tokens {
-            return true;
-        }
-        count += 1;
         let c = b.get(i).copied().unwrap_or(0);
         if c.is_ascii_whitespace() {
             i += 1;
             continue;
         }
+        if count >= max_tokens {
+            return true;
+        }
+        count += 1;
         let start = i;
         let next = b.get(i + 1).copied().unwrap_or(0);
         // Comments.
@@ -310,6 +310,16 @@ mod tests {
 
     fn kinds(s: &str) -> Vec<(TokKind, String)> {
         tokenize(s, 1000).0.into_iter().map(|t| (t.kind, t.text.to_string())).collect()
+    }
+
+    #[test]
+    fn whitespace_does_not_count_against_limit() {
+        let (t, truncated) = tokenize("a b c d", 4);
+        assert_eq!(t.len(), 4);
+        assert!(!truncated);
+        let (t, truncated) = tokenize("a b c d", 3);
+        assert_eq!(t.len(), 3);
+        assert!(truncated);
     }
 
     #[test]
